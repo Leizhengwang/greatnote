@@ -1,0 +1,35 @@
+# OS
+.DS_Store
+
+# Claude Code local settings
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.env
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+*.log
+local_settings.py
+staticfiles/
+media/
+
+# Node / React
+node_modules/
+build/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editors
+.vscode/
+.idea/
+*.swp
