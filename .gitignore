@@ -2,7 +2,7 @@
 .DS_Store
 
 # Claude Code local settings
-.claude/
+#.claude/
 
 # Python
 __pycache__/

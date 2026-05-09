@@ -51,6 +51,11 @@ function PageBlock({ page, pageNumber, totalPages, noteId, onUpdate, onInsertAft
         }}
       />
 
+      {/* word / char count */}
+      <div style={{ padding: '2px 12px 6px', fontSize: '11px', color: '#bbb', textAlign: 'right' }}>
+        {body.trim() ? body.trim().split(/\s+/).length : 0} words · {body.length.toLocaleString()} chars
+      </div>
+
       {/* insert-page-below button */}
       <div style={dividerStyle}>
         <div style={{ flex: 1, height: '1px', background: '#f0f0f0' }} />
