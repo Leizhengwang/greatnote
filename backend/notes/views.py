@@ -5,7 +5,13 @@ from rest_framework.views import APIView
 
 from .models import Note, Page
 from . import services
-from .serializers import NoteSerializer, PageSerializer
+from .serializers import (
+    NoteSerializer,
+    PageSerializer,
+    PublicShareSerializer,
+    SharedPageSerializer,
+    UserShareSerializer,
+)
 
 
 class RegisterView(APIView):
@@ -160,3 +166,88 @@ class NotePageDetailView(APIView):
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PagePublicShareView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, note_pk, pk):
+        try:
+            share = services.get_public_share(request.user, pk)
+        except Page.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if share is None:
+            return Response({"token": None, "is_active": False})
+        return Response(PublicShareSerializer(share).data)
+
+    def post(self, request, note_pk, pk):
+        try:
+            share = services.create_public_share(request.user, pk)
+        except Page.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(PublicShareSerializer(share).data, status=status.HTTP_201_CREATED)
+
+    def delete(self, request, note_pk, pk):
+        try:
+            services.revoke_public_share(request.user, pk)
+        except Page.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PageUserShareListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, note_pk, pk):
+        try:
+            shares = services.list_user_shares(request.user, pk)
+        except Page.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(UserShareSerializer(shares, many=True).data)
+
+    def post(self, request, note_pk, pk):
+        username = request.data.get("username", "").strip()
+        if not username:
+            return Response({"error": "username is required"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            share = services.share_page_with_user(request.user, pk, username)
+        except Page.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(UserShareSerializer(share).data, status=status.HTTP_201_CREATED)
+
+
+class PageUserShareDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, note_pk, pk, shared_user_id):
+        try:
+            services.revoke_user_share(request.user, pk, shared_user_id)
+        except Page.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        except Exception:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PublicPageView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, token):
+        try:
+            page = services.get_page_by_token(token)
+        except Exception:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(SharedPageSerializer(page).data)
+
+
+class SharedWithMePageView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            page = services.get_page_for_shared_user(request.user, pk)
+        except Page.DoesNotExist:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        return Response(SharedPageSerializer(page).data)

@@ -4,7 +4,7 @@ from django.db.models import F, Max, Q
 from django.utils.dateparse import parse_date
 from rest_framework.authtoken.models import Token
 
-from .models import Note, Page
+from .models import Note, Page, PublicPageShare, UserPageShare
 
 
 def register_user(username, password):
@@ -135,4 +135,72 @@ def update_page_body(user, page_id, body):
     page = Page.objects.get(pk=page_id, note__user=user)
     page.body = body
     page.save(update_fields=["body"])
+    return page
+
+
+# ------------------------------------------------------------------ #
+# Page sharing services                                                #
+# ------------------------------------------------------------------ #
+
+def _get_owned_page(user, page_id):
+    return Page.objects.get(pk=page_id, note__user=user)
+
+
+def create_public_share(user, page_id):
+    page = _get_owned_page(user, page_id)
+    share, _ = PublicPageShare.objects.update_or_create(
+        page=page,
+        defaults={"is_active": True},
+    )
+    return share
+
+
+def revoke_public_share(user, page_id):
+    page = _get_owned_page(user, page_id)
+    PublicPageShare.objects.filter(page=page).update(is_active=False)
+
+
+def get_page_by_token(token):
+    share = PublicPageShare.objects.select_related("page").get(token=token, is_active=True)
+    return share.page
+
+
+def get_public_share(user, page_id):
+    page = _get_owned_page(user, page_id)
+    try:
+        return PublicPageShare.objects.get(page=page)
+    except PublicPageShare.DoesNotExist:
+        return None
+
+
+def share_page_with_user(user, page_id, username):
+    page = _get_owned_page(user, page_id)
+    try:
+        target = User.objects.get(username=username)
+    except User.DoesNotExist:
+        raise ValueError(f"User '{username}' not found")
+    if target == user:
+        raise ValueError("Cannot share a page with yourself")
+    share, created = UserPageShare.objects.get_or_create(page=page, shared_with=target)
+    return share
+
+
+def revoke_user_share(user, page_id, shared_user_id):
+    page = _get_owned_page(user, page_id)
+    deleted, _ = UserPageShare.objects.filter(page=page, shared_with_id=shared_user_id).delete()
+    if not deleted:
+        raise UserPageShare.DoesNotExist("Share not found")
+
+
+def list_user_shares(user, page_id):
+    page = _get_owned_page(user, page_id)
+    return UserPageShare.objects.filter(page=page).select_related("shared_with")
+
+
+def get_page_for_shared_user(requesting_user, page_id):
+    try:
+        return Page.objects.get(pk=page_id, note__user=requesting_user)
+    except Page.DoesNotExist:
+        pass
+    page = Page.objects.get(pk=page_id, user_shares__shared_with=requesting_user)
     return page

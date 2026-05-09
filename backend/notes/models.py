@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.db import models
 
@@ -29,3 +31,23 @@ class Page(models.Model):
 
     class Meta:
         ordering = ["order"]
+
+
+class PublicPageShare(models.Model):
+    page = models.OneToOneField(Page, on_delete=models.CASCADE, related_name="public_share")
+    token = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class UserPageShare(models.Model):
+    page = models.ForeignKey(Page, on_delete=models.CASCADE, related_name="user_shares")
+    shared_with = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="shared_pages",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("page", "shared_with")]

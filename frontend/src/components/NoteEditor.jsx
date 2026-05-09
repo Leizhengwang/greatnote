@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useDebounce } from '../hooks/useDebounce';
+import ShareModal from './ShareModal';
 
 const btnStyle = {
   background: 'none', border: '1px solid #ddd', borderRadius: '3px',
@@ -25,7 +26,7 @@ function CodeBlock({ className, children }) {
   );
 }
 
-function PageBlock({ page, pageNumber, totalPages, onUpdate, onInsertAfter, onDelete, autoFocus }) {
+function PageBlock({ page, pageNumber, totalPages, onUpdate, onInsertAfter, onDelete, onShare, autoFocus }) {
   const [body, setBody] = useState(page.body);
   const [preview, setPreview] = useState(false);
   const debouncedBody = useDebounce(body, 500);
@@ -69,6 +70,9 @@ function PageBlock({ page, pageNumber, totalPages, onUpdate, onInsertAfter, onDe
       {/* page header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 12px', borderTop: pageNumber > 1 ? '1px dashed #e0e0e0' : 'none' }}>
         <span style={{ fontSize: '11px', color: '#aaa', flex: 1 }}>Page {pageNumber}</span>
+        <button style={btnStyle} onClick={() => onShare(page.id)} title="Share this page">
+          Share
+        </button>
         <button
           style={{ ...btnStyle, color: '#c00' }}
           onClick={() => onDelete(page.id)}
@@ -149,6 +153,8 @@ function PageBlock({ page, pageNumber, totalPages, onUpdate, onInsertAfter, onDe
 }
 
 export default function NoteEditor({ note, pages, onTitleChange, onPageUpdate, onInsertPage, onDeletePage, isSaving }) {
+  const [sharingPageId, setSharingPageId] = useState(null);
+
   if (!note) {
     return (
       <div style={{ padding: '24px', color: '#aaa', textAlign: 'center', marginTop: '60px' }}>
@@ -188,9 +194,17 @@ export default function NoteEditor({ note, pages, onTitleChange, onPageUpdate, o
             onUpdate={onPageUpdate}
             onInsertAfter={onInsertPage}
             onDelete={onDeletePage}
+            onShare={setSharingPageId}
             autoFocus={idx === 0}
           />
         ))
+      )}
+      {sharingPageId && (
+        <ShareModal
+          noteId={note.id}
+          pageId={sharingPageId}
+          onClose={() => setSharingPageId(null)}
+        />
       )}
     </div>
   );

@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
 
-from .models import Note, Page
+from .models import Note, Page, PublicPageShare, UserPageShare
 from . import services
 
 
@@ -538,3 +538,141 @@ class PageServiceTests(TestCase):
         theirs = services.create_note(other)
         with self.assertRaises(Page.DoesNotExist):
             services.update_page_body(self.user, theirs.pages.first().pk, "hijack")
+
+
+class PublicShareServiceTests(TestCase):
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="owner", password="p")
+        self.other = User.objects.create_user(username="other", password="p")
+        self.note = services.create_note(self.owner)
+        self.page = self.note.pages.first()
+
+    def test_create_public_share_returns_share_with_token(self):
+        share = services.create_public_share(self.owner, self.page.pk)
+        self.assertIsInstance(share, PublicPageShare)
+        self.assertIsNotNone(share.token)
+        self.assertTrue(share.is_active)
+
+    def test_create_public_share_is_idempotent_same_token(self):
+        share1 = services.create_public_share(self.owner, self.page.pk)
+        share2 = services.create_public_share(self.owner, self.page.pk)
+        self.assertEqual(share1.token, share2.token)
+
+    def test_get_page_by_token_returns_page_for_active_share(self):
+        share = services.create_public_share(self.owner, self.page.pk)
+        result = services.get_page_by_token(share.token)
+        self.assertEqual(result.pk, self.page.pk)
+
+    def test_get_page_by_token_raises_for_inactive_share(self):
+        share = services.create_public_share(self.owner, self.page.pk)
+        services.revoke_public_share(self.owner, self.page.pk)
+        with self.assertRaises(PublicPageShare.DoesNotExist):
+            services.get_page_by_token(share.token)
+
+    def test_get_page_by_token_raises_for_unknown_token(self):
+        import uuid
+        with self.assertRaises(PublicPageShare.DoesNotExist):
+            services.get_page_by_token(uuid.uuid4())
+
+    def test_revoke_public_share_deactivates_link(self):
+        services.create_public_share(self.owner, self.page.pk)
+        services.revoke_public_share(self.owner, self.page.pk)
+        share = PublicPageShare.objects.get(page=self.page)
+        self.assertFalse(share.is_active)
+
+    def test_create_public_share_reactivates_after_revocation(self):
+        services.create_public_share(self.owner, self.page.pk)
+        services.revoke_public_share(self.owner, self.page.pk)
+        share = services.create_public_share(self.owner, self.page.pk)
+        self.assertTrue(share.is_active)
+
+    def test_create_public_share_raises_for_other_users_page(self):
+        with self.assertRaises(Page.DoesNotExist):
+            services.create_public_share(self.other, self.page.pk)
+
+    def test_revoke_public_share_raises_for_other_users_page(self):
+        services.create_public_share(self.owner, self.page.pk)
+        with self.assertRaises(Page.DoesNotExist):
+            services.revoke_public_share(self.other, self.page.pk)
+
+    def test_get_public_share_returns_none_when_no_share_exists(self):
+        result = services.get_public_share(self.owner, self.page.pk)
+        self.assertIsNone(result)
+
+    def test_get_public_share_returns_share_after_creation(self):
+        services.create_public_share(self.owner, self.page.pk)
+        result = services.get_public_share(self.owner, self.page.pk)
+        self.assertIsNotNone(result)
+
+
+class UserShareServiceTests(TestCase):
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="owner", password="p")
+        self.invitee = User.objects.create_user(username="invitee", password="p")
+        self.stranger = User.objects.create_user(username="stranger", password="p")
+        self.note = services.create_note(self.owner)
+        self.page = self.note.pages.first()
+
+    def test_share_page_with_user_creates_share(self):
+        share = services.share_page_with_user(self.owner, self.page.pk, "invitee")
+        self.assertIsInstance(share, UserPageShare)
+        self.assertEqual(share.shared_with, self.invitee)
+
+    def test_share_page_with_user_is_idempotent(self):
+        services.share_page_with_user(self.owner, self.page.pk, "invitee")
+        services.share_page_with_user(self.owner, self.page.pk, "invitee")
+        self.assertEqual(UserPageShare.objects.filter(page=self.page, shared_with=self.invitee).count(), 1)
+
+    def test_share_page_with_user_raises_for_unknown_username(self):
+        with self.assertRaises(ValueError):
+            services.share_page_with_user(self.owner, self.page.pk, "nobody")
+
+    def test_share_page_with_user_raises_when_sharing_with_self(self):
+        with self.assertRaises(ValueError):
+            services.share_page_with_user(self.owner, self.page.pk, "owner")
+
+    def test_share_page_with_user_raises_for_other_users_page(self):
+        with self.assertRaises(Page.DoesNotExist):
+            services.share_page_with_user(self.invitee, self.page.pk, "stranger")
+
+    def test_revoke_user_share_removes_access(self):
+        services.share_page_with_user(self.owner, self.page.pk, "invitee")
+        services.revoke_user_share(self.owner, self.page.pk, self.invitee.pk)
+        self.assertFalse(UserPageShare.objects.filter(page=self.page, shared_with=self.invitee).exists())
+
+    def test_revoke_user_share_raises_for_other_users_page(self):
+        services.share_page_with_user(self.owner, self.page.pk, "invitee")
+        with self.assertRaises(Page.DoesNotExist):
+            services.revoke_user_share(self.stranger, self.page.pk, self.invitee.pk)
+
+    def test_list_user_shares_returns_all_granted_users(self):
+        services.share_page_with_user(self.owner, self.page.pk, "invitee")
+        services.share_page_with_user(self.owner, self.page.pk, "stranger")
+        shares = list(services.list_user_shares(self.owner, self.page.pk))
+        self.assertEqual(len(shares), 2)
+
+    def test_list_user_shares_raises_for_other_users_page(self):
+        with self.assertRaises(Page.DoesNotExist):
+            services.list_user_shares(self.invitee, self.page.pk)
+
+    def test_get_page_for_shared_user_owner_can_always_access(self):
+        page = services.get_page_for_shared_user(self.owner, self.page.pk)
+        self.assertEqual(page.pk, self.page.pk)
+
+    def test_get_page_for_shared_user_invitee_can_access_after_grant(self):
+        services.share_page_with_user(self.owner, self.page.pk, "invitee")
+        page = services.get_page_for_shared_user(self.invitee, self.page.pk)
+        self.assertEqual(page.pk, self.page.pk)
+
+    def test_get_page_for_shared_user_stranger_cannot_access(self):
+        services.share_page_with_user(self.owner, self.page.pk, "invitee")
+        with self.assertRaises(Page.DoesNotExist):
+            services.get_page_for_shared_user(self.stranger, self.page.pk)
+
+    def test_get_page_for_shared_user_invitee_loses_access_after_revoke(self):
+        services.share_page_with_user(self.owner, self.page.pk, "invitee")
+        services.revoke_user_share(self.owner, self.page.pk, self.invitee.pk)
+        with self.assertRaises(Page.DoesNotExist):
+            services.get_page_for_shared_user(self.invitee, self.page.pk)
