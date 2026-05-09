@@ -61,7 +61,13 @@ function NotesApp({ username, onLogout }) {
     }
     const note = notes.find(n => n.id === selectedNoteId);
     if (note) setEditorTitle(note.title);
-    pageService.listPages(selectedNoteId).then(setPages);
+    pageService.listPages(selectedNoteId).then(loaded => {
+      if (loaded.length === 0) {
+        pageService.insertPage(selectedNoteId, null).then(newPage => setPages([newPage]));
+      } else {
+        setPages(loaded);
+      }
+    });
   }, [selectedNoteId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Autosave title
