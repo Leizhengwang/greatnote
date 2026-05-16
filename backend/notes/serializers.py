@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Note, Page, PublicPageShare, UserPageShare
+from .models import Note, Page, PageAttachment, PublicPageShare, UserPageShare
 
 
 class NoteSerializer(serializers.ModelSerializer):
@@ -34,6 +34,13 @@ class UserShareSerializer(serializers.ModelSerializer):
         model = UserPageShare
         fields = ["id", "shared_with_id", "username", "created_at"]
         read_only_fields = ["id", "shared_with_id", "username", "created_at"]
+
+
+class PageAttachmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PageAttachment
+        fields = ["id", "filename", "size", "uploaded_at"]
+        read_only_fields = ["id", "filename", "size", "uploaded_at"]
 
 
 class SharedPageSerializer(serializers.ModelSerializer):

@@ -1,12 +1,15 @@
+from django.http import FileResponse
+
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Note, Page
+from .models import Note, Page, PageAttachment
 from . import services
 from .serializers import (
     NoteSerializer,
+    PageAttachmentSerializer,
     PageSerializer,
     PublicShareSerializer,
     SharedPageSerializer,
@@ -268,3 +271,45 @@ class AIReviseView(APIView):
         except Exception:
             return Response({"error": "AI service error"}, status=status.HTTP_502_BAD_GATEWAY)
         return Response(result)
+
+
+class PageAttachmentListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, note_pk, pk):
+        try:
+            attachments = services.list_attachments(request.user, pk)
+        except Page.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(PageAttachmentSerializer(attachments, many=True).data)
+
+    def post(self, request, note_pk, pk):
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response({"error": "No file provided"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            attachment = services.upload_attachment(request.user, pk, file_obj)
+        except Page.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(PageAttachmentSerializer(attachment).data, status=status.HTTP_201_CREATED)
+
+
+class PageAttachmentDownloadDeleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, note_pk, pk, att_pk):
+        try:
+            attachment = services.get_attachment(request.user, att_pk)
+        except PageAttachment.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        response = FileResponse(attachment.file.open("rb"), as_attachment=True, filename=attachment.filename)
+        return response
+
+    def delete(self, request, note_pk, pk, att_pk):
+        try:
+            services.delete_attachment(request.user, att_pk)
+        except PageAttachment.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)

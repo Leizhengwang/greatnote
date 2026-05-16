@@ -16,4 +16,6 @@ urlpatterns = [
     path("shared/<uuid:token>/", views.PublicPageView.as_view(), name="page-public-view"),
     path("pages/<int:pk>/shared-with-me/", views.SharedWithMePageView.as_view(), name="page-shared-with-me"),
     path("notes/<int:note_pk>/pages/<int:pk>/ai-revise/", views.AIReviseView.as_view(), name="ai-revise"),
+    path("notes/<int:note_pk>/pages/<int:pk>/attachments/", views.PageAttachmentListCreateView.as_view(), name="page-attachments"),
+    path("notes/<int:note_pk>/pages/<int:pk>/attachments/<int:att_pk>/", views.PageAttachmentDownloadDeleteView.as_view(), name="page-attachment-detail"),
 ]

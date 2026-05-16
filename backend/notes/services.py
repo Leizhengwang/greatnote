@@ -8,7 +8,7 @@ from django.db.models import F, Max, Q
 from django.utils.dateparse import parse_date
 from rest_framework.authtoken.models import Token
 
-from .models import Note, Page, PublicPageShare, UserPageShare
+from .models import Note, Page, PageAttachment, PublicPageShare, UserPageShare
 
 _VALID_AI_ACTIONS = {"improve", "shorter", "longer", "grammar"}
 
@@ -265,3 +265,38 @@ def ai_revise_text(user, page_id, action, text):
         errors = json.loads(result_text)
         return {"errors": errors}
     return {"result": result_text}
+
+
+# ------------------------------------------------------------------ #
+# Attachment services                                                   #
+# ------------------------------------------------------------------ #
+
+_MAX_UPLOAD_SIZE = 1024 * 1024 * 1024  # 1 GB
+
+
+def upload_attachment(user, page_id, file_obj):
+    page = Page.objects.get(pk=page_id, note__user=user)
+    if file_obj.size > _MAX_UPLOAD_SIZE:
+        raise ValueError("File exceeds the 1 GB size limit")
+    attachment = PageAttachment.objects.create(
+        page=page,
+        file=file_obj,
+        filename=file_obj.name,
+        size=file_obj.size,
+    )
+    return attachment
+
+
+def list_attachments(user, page_id):
+    Page.objects.get(pk=page_id, note__user=user)  # ownership check
+    return PageAttachment.objects.filter(page_id=page_id)
+
+
+def get_attachment(user, attachment_id):
+    return PageAttachment.objects.get(pk=attachment_id, page__note__user=user)
+
+
+def delete_attachment(user, attachment_id):
+    attachment = PageAttachment.objects.get(pk=attachment_id, page__note__user=user)
+    attachment.file.delete(save=False)
+    attachment.delete()

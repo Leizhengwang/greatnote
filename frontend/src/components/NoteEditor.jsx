@@ -6,6 +6,7 @@ import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useDebounce } from '../hooks/useDebounce';
 import ShareModal from './ShareModal';
 import { reviseText } from '../services/aiService';
+import { listAttachments, uploadAttachment, deleteAttachment, downloadAttachment } from '../services/attachmentService';
 
 const btnStyle = {
   background: 'none', border: '1px solid #ddd', borderRadius: '3px',
@@ -167,6 +168,41 @@ function PageBlock({ noteId, page, pageNumber, totalPages, onUpdate, onInsertAft
   const [aiToolbarPos, setAiToolbarPos] = useState({ top: 0, left: 0 });
   const [aiLoading, setAiLoading] = useState(false);
   const [aiErrors, setAiErrors] = useState(null); // { errors: [], selectionStart, selectionEnd }
+
+  // Attachment state
+  const [attachments, setAttachments] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    listAttachments(noteId, page.id).then(setAttachments).catch(() => {});
+  }, [noteId, page.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      const attachment = await uploadAttachment(noteId, page.id, file, setUploadProgress);
+      setAttachments(prev => [...prev, attachment]);
+    } catch {
+      // silently ignore upload errors
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleDeleteAttachment = async (att) => {
+    try {
+      await deleteAttachment(noteId, page.id, att.id);
+      setAttachments(prev => prev.filter(a => a.id !== att.id));
+    } catch {
+      // silently ignore
+    }
+  };
 
   useEffect(() => { setBody(page.body); }, [page.id]);
 
@@ -356,6 +392,50 @@ function PageBlock({ noteId, page, pageNumber, totalPages, onUpdate, onInsertAft
       {/* word / char count */}
       <div style={{ padding: '2px 12px 6px', fontSize: '11px', color: '#bbb', textAlign: 'right' }}>
         {body.trim() ? body.trim().split(/\s+/).length : 0} words · {body.length.toLocaleString()} chars
+      </div>
+
+      {/* attachments */}
+      <div style={{ padding: '6px 12px 4px', borderTop: '1px solid #f5f5f5' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: attachments.length ? '6px' : 0 }}>
+          <span style={{ fontSize: '11px', color: '#aaa' }}>Attachments</span>
+          <input
+            ref={fileInputRef}
+            type="file"
+            style={{ display: 'none' }}
+            onChange={handleUpload}
+          />
+          <button
+            style={{ ...btnStyle, marginLeft: 'auto' }}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+          >
+            {uploading ? `Uploading ${uploadProgress}%` : '+ Attach file'}
+          </button>
+        </div>
+        {attachments.map(att => (
+          <div key={att.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '3px 0', fontSize: '12px' }}>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#444' }}>
+              {att.filename}
+            </span>
+            <span style={{ color: '#bbb', fontSize: '11px', flexShrink: 0 }}>
+              {att.size < 1024 * 1024
+                ? `${(att.size / 1024).toFixed(1)} KB`
+                : `${(att.size / (1024 * 1024)).toFixed(1)} MB`}
+            </span>
+            <button
+              style={{ ...btnStyle, color: '#1a73e8', border: 'none' }}
+              onClick={() => downloadAttachment(noteId, page.id, att.id, att.filename)}
+            >
+              Download
+            </button>
+            <button
+              style={{ ...btnStyle, color: '#c00', border: 'none' }}
+              onClick={() => handleDeleteAttachment(att)}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
       </div>
 
       {/* insert-page-below button */}

@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
 
-from .models import Note, Page, PublicPageShare, UserPageShare
+from .models import Note, Page, PageAttachment, PublicPageShare, UserPageShare
 from . import services
 
 
@@ -748,3 +748,72 @@ class AIReviseServiceTests(TestCase):
     def test_missing_page_raises_does_not_exist(self):
         with self.assertRaises(Page.DoesNotExist):
             services.ai_revise_text(self.user, 99999, "improve", "text")
+
+
+class PageAttachmentServiceTests(TestCase):
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="owner", password="p")
+        self.other = User.objects.create_user(username="other", password="p")
+        self.note = services.create_note(self.user)
+        self.page = self.note.pages.first()
+
+    def _make_file(self, name="test.txt", content=b"hello", size=None):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        f = SimpleUploadedFile(name, content)
+        if size is not None:
+            f.size = size
+        return f
+
+    def test_upload_creates_attachment(self):
+        att = services.upload_attachment(self.user, self.page.pk, self._make_file())
+        self.assertIsInstance(att, PageAttachment)
+        self.assertEqual(att.filename, "test.txt")
+        self.assertEqual(att.page, self.page)
+
+    def test_upload_stores_correct_size(self):
+        att = services.upload_attachment(self.user, self.page.pk, self._make_file(content=b"abc"))
+        self.assertEqual(att.size, 3)
+
+    def test_upload_raises_for_other_users_page(self):
+        with self.assertRaises(Page.DoesNotExist):
+            services.upload_attachment(self.other, self.page.pk, self._make_file())
+
+    def test_upload_raises_for_missing_page(self):
+        with self.assertRaises(Page.DoesNotExist):
+            services.upload_attachment(self.user, 99999, self._make_file())
+
+    def test_upload_raises_when_file_exceeds_limit(self):
+        oversized = self._make_file(size=1024 * 1024 * 1024 + 1)
+        with self.assertRaises(ValueError):
+            services.upload_attachment(self.user, self.page.pk, oversized)
+
+    def test_list_attachments_returns_uploaded_files(self):
+        services.upload_attachment(self.user, self.page.pk, self._make_file("a.txt"))
+        services.upload_attachment(self.user, self.page.pk, self._make_file("b.txt"))
+        atts = list(services.list_attachments(self.user, self.page.pk))
+        self.assertEqual(len(atts), 2)
+
+    def test_list_attachments_raises_for_other_users_page(self):
+        with self.assertRaises(Page.DoesNotExist):
+            services.list_attachments(self.other, self.page.pk)
+
+    def test_get_attachment_returns_correct_object(self):
+        att = services.upload_attachment(self.user, self.page.pk, self._make_file())
+        fetched = services.get_attachment(self.user, att.pk)
+        self.assertEqual(fetched.pk, att.pk)
+
+    def test_get_attachment_raises_for_other_user(self):
+        att = services.upload_attachment(self.user, self.page.pk, self._make_file())
+        with self.assertRaises(PageAttachment.DoesNotExist):
+            services.get_attachment(self.other, att.pk)
+
+    def test_delete_attachment_removes_record(self):
+        att = services.upload_attachment(self.user, self.page.pk, self._make_file())
+        services.delete_attachment(self.user, att.pk)
+        self.assertFalse(PageAttachment.objects.filter(pk=att.pk).exists())
+
+    def test_delete_attachment_raises_for_other_user(self):
+        att = services.upload_attachment(self.user, self.page.pk, self._make_file())
+        with self.assertRaises(PageAttachment.DoesNotExist):
+            services.delete_attachment(self.other, att.pk)

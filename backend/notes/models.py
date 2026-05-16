@@ -51,3 +51,18 @@ class UserPageShare(models.Model):
 
     class Meta:
         unique_together = [("page", "shared_with")]
+
+
+def _attachment_upload_path(instance, filename):
+    return f"attachments/user_{instance.page.note.user_id}/page_{instance.page_id}/{filename}"
+
+
+class PageAttachment(models.Model):
+    page = models.ForeignKey(Page, on_delete=models.CASCADE, related_name="attachments")
+    file = models.FileField(upload_to=_attachment_upload_path)
+    filename = models.CharField(max_length=255)
+    size = models.BigIntegerField()
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["uploaded_at"]
