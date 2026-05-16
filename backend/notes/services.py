@@ -306,6 +306,95 @@ def delete_attachment(user, attachment_id):
 
 
 # ------------------------------------------------------------------ #
+# Project tracker                                                      #
+# ------------------------------------------------------------------ #
+
+_PROJECT_TRACKER_PROMPT = """\
+You are a project analysis assistant. Below are the contents of one or more notes. \
+Each note may describe one or more projects, with timelines, stages, deadlines, and statuses \
+mixed together and potentially spanning multiple notes.
+
+Your job:
+1. Identify every distinct project mentioned across ALL notes.
+2. For each project, extract every stage/milestone with its name, status \
+(one of: "planning", "ongoing", "complete"), start date, end date, and any details. \
+Use null for unknown dates.
+3. Determine the final deadline and overall status for each project.
+4. Build a unified chronological timeline across all projects, merging all milestones \
+from all projects into a single ordered sequence a person can follow.
+
+Return ONLY a valid JSON object with exactly this structure — no markdown fences, \
+no explanation, no preamble:
+
+{
+  "projects": [
+    {
+      "name": "<project name>",
+      "source_notes": ["<note title>"],
+      "overall_status": "planning|ongoing|complete",
+      "final_deadline": "<YYYY-MM-DD or null>",
+      "stages": [
+        {
+          "name": "<stage name>",
+          "status": "planning|ongoing|complete",
+          "start_date": "<YYYY-MM-DD or null>",
+          "end_date": "<YYYY-MM-DD or null>",
+          "details": "<brief detail or empty string>"
+        }
+      ]
+    }
+  ],
+  "unified_timeline": {
+    "summary": "<2-3 sentence overall summary for one person managing all these projects>",
+    "entries": [
+      {
+        "date": "<YYYY-MM-DD or null>",
+        "project": "<project name>",
+        "milestone": "<stage or event name>",
+        "status": "planning|ongoing|complete",
+        "notes": "<brief context>"
+      }
+    ]
+  }
+}
+
+The unified_timeline entries must be sorted: complete entries first (chronologically), \
+then ongoing, then planning. Within each status group, sort by date ascending \
+(null dates go last).
+
+--- NOTES CONTENT BELOW ---
+
+"""
+
+
+def analyze_projects(user, note_ids):
+    notes = list(
+        Note.objects.filter(user=user, pk__in=note_ids).prefetch_related("pages")
+    )
+    if not notes:
+        raise ValueError("No accessible notes found for the given IDs")
+
+    note_blocks = []
+    for note in notes:
+        title = note.title or "(Untitled)"
+        pages_text = "\n\n".join(p.body for p in note.pages.all() if p.body.strip())
+        block = f"=== Note: {title} ===\n{pages_text}" if pages_text else f"=== Note: {title} ===\n(empty)"
+        note_blocks.append(block)
+
+    prompt = _PROJECT_TRACKER_PROMPT + "\n\n".join(note_blocks)
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    client = anthropic.Anthropic(api_key=api_key)
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4096,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = message.content[0].text.strip()
+    return json.loads(raw)
+
+
+# ------------------------------------------------------------------ #
 # Note content-based ranking                                           #
 # ------------------------------------------------------------------ #
 

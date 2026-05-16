@@ -9,6 +9,7 @@ import SearchBar from './components/SearchBar';
 import FilterPanel from './components/FilterPanel';
 import LoginRegister from './components/LoginRegister';
 import DocRanking from './components/DocRanking';
+import ProjectTracker from './components/ProjectTracker';
 
 const EMPTY_FILTERS = { createdAfter: '', createdBefore: '', modifiedAfter: '', modifiedBefore: '' };
 
@@ -31,7 +32,8 @@ function NotesApp({ username, onLogout }) {
   const [filters, setFilters]                 = useState(EMPTY_FILTERS);
   const [showFilters, setShowFilters]         = useState(false);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
-  const [showDocRanking, setShowDocRanking]     = useState(false);
+  const [showDocRanking, setShowDocRanking]       = useState(false);
+  const [showProjectTracker, setShowProjectTracker] = useState(false);
   const [isSaving, setIsSaving]               = useState(false);
 
   const debouncedTitle = useDebounce(editorTitle, 500);
@@ -174,10 +176,16 @@ function NotesApp({ username, onLogout }) {
             Filters
           </button>
           <button
-            onClick={() => setShowDocRanking(v => !v)}
+            onClick={() => { setShowDocRanking(v => !v); setShowProjectTracker(false); }}
             style={{ fontSize: '12px', padding: '3px 6px', background: showDocRanking ? '#d1fae5' : '#f0f0f0', border: '1px solid #ccc', borderRadius: '3px', cursor: 'pointer' }}
           >
             Docs
+          </button>
+          <button
+            onClick={() => { setShowProjectTracker(v => !v); setShowDocRanking(false); }}
+            style={{ fontSize: '12px', padding: '3px 6px', background: showProjectTracker ? '#ede9fe' : '#f0f0f0', border: '1px solid #ccc', borderRadius: '3px', cursor: 'pointer' }}
+          >
+            Projects
           </button>
           <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#666' }}>
             <span style={{ flex: 1 }}>{username}</span>
@@ -205,9 +213,11 @@ function NotesApp({ username, onLogout }) {
         </div>
       </div>
 
-      {/* Editor / Doc Ranking */}
+      {/* Editor / Doc Ranking / Project Tracker */}
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {showDocRanking ? (
+        {showProjectTracker ? (
+          <ProjectTracker onBack={() => setShowProjectTracker(false)} />
+        ) : showDocRanking ? (
           <DocRanking onBack={() => setShowDocRanking(false)} />
         ) : (
           <NoteEditor
