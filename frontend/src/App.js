@@ -8,6 +8,7 @@ import NoteEditor from './components/NoteEditor';
 import SearchBar from './components/SearchBar';
 import FilterPanel from './components/FilterPanel';
 import LoginRegister from './components/LoginRegister';
+import DocRanking from './components/DocRanking';
 
 const EMPTY_FILTERS = { createdAfter: '', createdBefore: '', modifiedAfter: '', modifiedBefore: '' };
 
@@ -30,6 +31,7 @@ function NotesApp({ username, onLogout }) {
   const [filters, setFilters]                 = useState(EMPTY_FILTERS);
   const [showFilters, setShowFilters]         = useState(false);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [showDocRanking, setShowDocRanking]     = useState(false);
   const [isSaving, setIsSaving]               = useState(false);
 
   const debouncedTitle = useDebounce(editorTitle, 500);
@@ -154,6 +156,12 @@ function NotesApp({ username, onLogout }) {
           >
             Filters
           </button>
+          <button
+            onClick={() => setShowDocRanking(v => !v)}
+            style={{ fontSize: '12px', padding: '3px 6px', background: showDocRanking ? '#d1fae5' : '#f0f0f0', border: '1px solid #ccc', borderRadius: '3px', cursor: 'pointer' }}
+          >
+            Docs
+          </button>
           <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#666' }}>
             <span style={{ flex: 1 }}>{username}</span>
             <button
@@ -180,17 +188,21 @@ function NotesApp({ username, onLogout }) {
         </div>
       </div>
 
-      {/* Editor */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        <NoteEditor
-          note={selectedNote}
-          pages={pages}
-          onTitleChange={setEditorTitle}
-          onPageUpdate={handlePageUpdate}
-          onInsertPage={handleInsertPage}
-          onDeletePage={handleDeletePage}
-          isSaving={isSaving}
-        />
+      {/* Editor / Doc Ranking */}
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        {showDocRanking ? (
+          <DocRanking />
+        ) : (
+          <NoteEditor
+            note={selectedNote}
+            pages={pages}
+            onTitleChange={setEditorTitle}
+            onPageUpdate={handlePageUpdate}
+            onInsertPage={handleInsertPage}
+            onDeletePage={handleDeletePage}
+            isSaving={isSaving}
+          />
+        )}
       </div>
     </div>
   );

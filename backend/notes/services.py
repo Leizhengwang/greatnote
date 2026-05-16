@@ -1,3 +1,7 @@
+import re
+import math
+from collections import Counter
+
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.db.models import F, Max, Q
@@ -136,3 +140,101 @@ def update_page_body(user, page_id, body):
     page.body = body
     page.save(update_fields=["body"])
     return page
+
+
+# ------------------------------------------------------------------ #
+# Note content-based ranking                                           #
+# ------------------------------------------------------------------ #
+
+_RANKING_STOPWORDS = {
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "from", "as", "is", "are", "was", "were", "be",
+    "been", "being", "have", "has", "had", "do", "does", "did", "will",
+    "would", "could", "should", "may", "might", "can", "not", "no", "nor",
+    "so", "if", "then", "than", "this", "that", "these", "those", "it",
+    "its", "you", "your", "we", "our", "they", "their", "he", "she", "him",
+    "her", "i", "my", "me", "us", "who", "which", "what", "when", "where",
+    "how", "all", "any", "each", "every", "both", "few", "more", "most",
+    "other", "some", "such", "here", "there", "into", "through", "during",
+    "before", "after", "above", "below", "between", "out", "up", "down",
+    "also", "just", "only", "about", "against", "via",
+}
+
+
+def _rank_tokenize(text: str) -> list:
+    tokens = re.sub(r"[^a-zA-Z0-9]", " ", text).lower().split()
+    return [t for t in tokens if len(t) >= 3 and t not in _RANKING_STOPWORDS]
+
+
+def rank_notes_by_criteria(user, note_ids, criteria: str) -> dict:
+    """BM25 ranking of selected user notes against a free-text criteria query."""
+    notes = list(
+        Note.objects.filter(user=user, pk__in=note_ids).prefetch_related("pages")
+    )
+    if not notes:
+        return {"ranked": [], "query_terms": []}
+
+    query_terms = _rank_tokenize(criteria)
+
+    if not query_terms:
+        return {
+            "ranked": [
+                {
+                    "rank": i + 1,
+                    "note_id": n.pk,
+                    "title": n.title or "(Untitled)",
+                    "score": 0.0,
+                    "matched_keywords": [],
+                }
+                for i, n in enumerate(notes)
+            ],
+            "query_terms": [],
+        }
+
+    def _note_tokens(note):
+        # Title is weighted 3× to reflect its importance
+        title_toks = _rank_tokenize(note.title) * 3
+        body_toks = _rank_tokenize(note.body)
+        page_toks = [t for page in note.pages.all() for t in _rank_tokenize(page.body)]
+        return title_toks + body_toks + page_toks
+
+    doc_tokens = [_note_tokens(n) for n in notes]
+    doc_freqs = [Counter(toks) for toks in doc_tokens]
+    doc_lengths = [len(toks) for toks in doc_tokens]
+    avg_dl = sum(doc_lengths) / len(doc_lengths)
+
+    N = len(notes)
+    k1, b = 1.5, 0.75
+
+    scores = [0.0] * N
+    matched_per_doc = [set() for _ in range(N)]
+
+    for term in set(query_terms):
+        df = sum(1 for freq in doc_freqs if term in freq)
+        if df == 0:
+            continue
+        idf = math.log((N - df + 0.5) / (df + 0.5) + 1)
+        for i, freq in enumerate(doc_freqs):
+            tf = freq.get(term, 0)
+            if tf == 0:
+                continue
+            dl = doc_lengths[i] or 1
+            tf_norm = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / avg_dl))
+            scores[i] += idf * tf_norm
+            matched_per_doc[i].add(term)
+
+    ranked_indices = sorted(range(N), key=lambda i: scores[i], reverse=True)
+
+    return {
+        "ranked": [
+            {
+                "rank": rank + 1,
+                "note_id": notes[i].pk,
+                "title": notes[i].title or "(Untitled)",
+                "score": round(scores[i], 4),
+                "matched_keywords": sorted(matched_per_doc[i]),
+            }
+            for rank, i in enumerate(ranked_indices)
+        ],
+        "query_terms": sorted(set(query_terms)),
+    }

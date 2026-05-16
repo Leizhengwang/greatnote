@@ -142,6 +142,19 @@ class NotePageListCreateView(APIView):
         return Response(PageSerializer(page).data, status=status.HTTP_201_CREATED)
 
 
+class NoteRankingView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        note_ids = request.data.get("note_ids", [])
+        criteria = (request.data.get("criteria") or "").strip()
+        if not note_ids:
+            return Response({"error": "note_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not criteria:
+            return Response({"error": "criteria is required"}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(services.rank_notes_by_criteria(request.user, note_ids, criteria))
+
+
 class NotePageDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
