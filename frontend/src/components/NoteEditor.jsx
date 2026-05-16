@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useDebounce } from '../hooks/useDebounce';
 import ShareModal from './ShareModal';
+import { reviseText } from '../services/aiService';
 
 const btnStyle = {
   background: 'none', border: '1px solid #ddd', borderRadius: '3px',
@@ -17,6 +18,12 @@ const toolbarBtnStyle = {
   fontFamily: 'inherit',
 };
 
+const aiBtnStyle = {
+  background: 'transparent', border: 'none', borderRadius: '4px',
+  cursor: 'pointer', fontSize: '12px', padding: '3px 9px', color: '#fff',
+  fontFamily: 'inherit', fontWeight: 500,
+};
+
 function CodeBlock({ className, children }) {
   const language = /language-(\w+)/.exec(className || '')?.[1] ?? 'text';
   return (
@@ -26,11 +33,140 @@ function CodeBlock({ className, children }) {
   );
 }
 
-function PageBlock({ page, pageNumber, totalPages, onUpdate, onInsertAfter, onDelete, onShare, autoFocus }) {
+function AIToolbar({ pos, loading, onAction, onDismiss }) {
+  const actions = [
+    { key: 'improve', label: 'Improve' },
+    { key: 'shorter', label: 'Shorter' },
+    { key: 'longer', label: 'Longer' },
+    { key: 'grammar', label: 'Grammar' },
+  ];
+
+  return (
+    <div
+      onMouseDown={e => e.preventDefault()}
+      style={{
+        position: 'fixed',
+        top: pos.top,
+        left: pos.left,
+        transform: 'translateX(-50%)',
+        zIndex: 9999,
+        background: '#1e1e2e',
+        borderRadius: '8px',
+        padding: '4px 6px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '2px',
+        boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
+        pointerEvents: 'all',
+      }}
+    >
+      {loading ? (
+        <span style={{ color: '#aaa', fontSize: '12px', padding: '3px 8px' }}>AI thinking…</span>
+      ) : (
+        <>
+          <span style={{ color: '#666', fontSize: '11px', padding: '0 6px 0 2px', borderRight: '1px solid #333' }}>
+            ✦ AI
+          </span>
+          {actions.map(({ key, label }) => (
+            <button key={key} style={aiBtnStyle} onClick={() => onAction(key)}>
+              {label}
+            </button>
+          ))}
+          <button
+            onMouseDown={e => e.preventDefault()}
+            onClick={onDismiss}
+            style={{ ...aiBtnStyle, color: '#777', marginLeft: '2px', borderLeft: '1px solid #333', paddingLeft: '8px' }}
+          >
+            ✕
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function GrammarPanel({ errorsState, onApply, onDismiss, onClear }) {
+  const { errors } = errorsState;
+
+  if (errors.length === 0) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: '8px',
+        padding: '6px 12px', background: '#f0faf0',
+        borderTop: '1px solid #c3e6c3', fontSize: '12px', color: '#2a7a2a',
+      }}>
+        <span>✓ No grammar or spelling errors found.</span>
+        <button
+          style={{ ...btnStyle, marginLeft: 'auto', color: '#888', border: 'none' }}
+          onClick={onClear}
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      background: '#fff8f8', borderTop: '1px solid #fddede',
+      padding: '8px 12px', fontSize: '13px',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px', gap: '6px' }}>
+        <span style={{ fontWeight: 600, color: '#b00', fontSize: '12px' }}>
+          {errors.length} {errors.length === 1 ? 'issue' : 'issues'} found
+        </span>
+        <button
+          style={{ ...btnStyle, marginLeft: 'auto', fontSize: '11px' }}
+          onClick={onClear}
+        >
+          Clear all
+        </button>
+      </div>
+      {errors.map((err, i) => (
+        <div
+          key={i}
+          style={{
+            display: 'flex', alignItems: 'flex-start', gap: '8px',
+            padding: '5px 0', borderTop: i > 0 ? '1px solid #fde8e8' : 'none',
+          }}
+        >
+          <div style={{ flex: 1, lineHeight: '1.5' }}>
+            <span style={{ color: '#c00', textDecoration: 'line-through' }}>{err.original}</span>
+            {' → '}
+            <span style={{ color: '#1a6e1a', fontWeight: 500 }}>{err.correction}</span>
+            <span style={{ color: '#888', fontSize: '11px', marginLeft: '6px' }}>
+              {err.explanation}
+            </span>
+          </div>
+          <button
+            style={{ ...btnStyle, background: '#1a6e1a', color: '#fff', border: 'none', flexShrink: 0 }}
+            onClick={() => onApply(err)}
+          >
+            Apply
+          </button>
+          <button
+            style={{ ...btnStyle, flexShrink: 0 }}
+            onClick={() => onDismiss(err)}
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PageBlock({ noteId, page, pageNumber, totalPages, onUpdate, onInsertAfter, onDelete, onShare, autoFocus }) {
   const [body, setBody] = useState(page.body);
   const [preview, setPreview] = useState(false);
   const debouncedBody = useDebounce(body, 500);
   const textareaRef = useRef(null);
+
+  // AI state
+  const [aiSelection, setAiSelection] = useState(null); // { start, end, text }
+  const [aiToolbarPos, setAiToolbarPos] = useState({ top: 0, left: 0 });
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiErrors, setAiErrors] = useState(null); // { errors: [], selectionStart, selectionEnd }
 
   useEffect(() => { setBody(page.body); }, [page.id]);
 
@@ -58,6 +194,66 @@ function PageBlock({ page, pageNumber, totalPages, onUpdate, onInsertAfter, onDe
       el.focus();
       el.setSelectionRange(start + before.length, end + before.length + selected.length);
     }, 0);
+  };
+
+  const handleTextareaSelect = useCallback((e) => {
+    const el = e.target;
+    if (el.selectionStart !== el.selectionEnd) {
+      const rect = el.getBoundingClientRect();
+      setAiToolbarPos({
+        top: rect.top - 44,
+        left: rect.left + rect.width / 2,
+      });
+      setAiSelection({
+        start: el.selectionStart,
+        end: el.selectionEnd,
+        text: el.value.slice(el.selectionStart, el.selectionEnd),
+      });
+    } else {
+      setAiSelection(null);
+    }
+  }, []);
+
+  const handleAiAction = async (action) => {
+    if (!aiSelection) return;
+    const { start, end, text } = aiSelection;
+    setAiLoading(true);
+    setAiErrors(null);
+    try {
+      const result = await reviseText(noteId, page.id, action, text);
+      if (action === 'grammar') {
+        setAiErrors({ errors: result.errors, selectionStart: start, selectionEnd: end });
+      } else {
+        setBody(prev => prev.slice(0, start) + result.result + prev.slice(end));
+      }
+    } catch {
+      // silently ignore — no API key or network error
+    } finally {
+      setAiLoading(false);
+      setAiSelection(null);
+    }
+  };
+
+  const applyGrammarCorrection = (error) => {
+    if (!aiErrors) return;
+    // Search within the original selection range for precision
+    const selText = body.slice(aiErrors.selectionStart, aiErrors.selectionEnd);
+    const localIdx = selText.indexOf(error.original);
+    if (localIdx === -1) return;
+    const globalIdx = aiErrors.selectionStart + localIdx;
+    const newBody =
+      body.slice(0, globalIdx) + error.correction + body.slice(globalIdx + error.original.length);
+    setBody(newBody);
+    const delta = error.correction.length - error.original.length;
+    setAiErrors(prev => ({
+      ...prev,
+      errors: prev.errors.filter(e => e !== error),
+      selectionEnd: prev.selectionEnd + delta,
+    }));
+  };
+
+  const dismissGrammarError = (error) => {
+    setAiErrors(prev => ({ ...prev, errors: prev.errors.filter(e => e !== error) }));
   };
 
   const dividerStyle = {
@@ -125,6 +321,8 @@ function PageBlock({ page, pageNumber, totalPages, onUpdate, onInsertAfter, onDe
           ref={textareaRef}
           value={body}
           onChange={e => setBody(e.target.value)}
+          onMouseUp={handleTextareaSelect}
+          onKeyUp={handleTextareaSelect}
           placeholder={`Page ${pageNumber} content… (supports Markdown)`}
           style={{
             display: 'block', width: '100%', minHeight: '160px',
@@ -132,6 +330,26 @@ function PageBlock({ page, pageNumber, totalPages, onUpdate, onInsertAfter, onDe
             fontSize: '14px', lineHeight: '1.6', fontFamily: 'inherit',
             padding: '8px 12px', boxSizing: 'border-box', background: 'transparent',
           }}
+        />
+      )}
+
+      {/* floating AI toolbar — shown when text is selected in edit mode */}
+      {aiSelection && !preview && (
+        <AIToolbar
+          pos={aiToolbarPos}
+          loading={aiLoading}
+          onAction={handleAiAction}
+          onDismiss={() => setAiSelection(null)}
+        />
+      )}
+
+      {/* grammar / spelling error panel */}
+      {aiErrors && (
+        <GrammarPanel
+          errorsState={aiErrors}
+          onApply={applyGrammarCorrection}
+          onDismiss={dismissGrammarError}
+          onClear={() => setAiErrors(null)}
         />
       )}
 
@@ -188,6 +406,7 @@ export default function NoteEditor({ note, pages, onTitleChange, onPageUpdate, o
         pages.map((page, idx) => (
           <PageBlock
             key={page.id}
+            noteId={note.id}
             page={page}
             pageNumber={idx + 1}
             totalPages={pages.length}

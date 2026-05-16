@@ -1,3 +1,7 @@
+import json
+import os
+
+import anthropic
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.db.models import F, Max, Q
@@ -5,6 +9,8 @@ from django.utils.dateparse import parse_date
 from rest_framework.authtoken.models import Token
 
 from .models import Note, Page, PublicPageShare, UserPageShare
+
+_VALID_AI_ACTIONS = {"improve", "shorter", "longer", "grammar"}
 
 
 def register_user(username, password):
@@ -204,3 +210,58 @@ def get_page_for_shared_user(requesting_user, page_id):
         pass
     page = Page.objects.get(pk=page_id, user_shares__shared_with=requesting_user)
     return page
+
+
+# ------------------------------------------------------------------ #
+# AI revision                                                          #
+# ------------------------------------------------------------------ #
+
+def ai_revise_text(user, page_id, action, text):
+    Page.objects.get(pk=page_id, note__user=user)  # ownership check
+    if action not in _VALID_AI_ACTIONS:
+        raise ValueError(f"Invalid action: {action}")
+    if not text or not text.strip():
+        raise ValueError("Text must not be empty")
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    client = anthropic.Anthropic(api_key=api_key)
+
+    if action == "improve":
+        prompt = (
+            "Improve the writing of the following text. "
+            "Return only the improved text, no explanation, no preamble:\n\n" + text
+        )
+    elif action == "shorter":
+        prompt = (
+            "Make the following text shorter and more concise. "
+            "Return only the condensed text, no explanation, no preamble:\n\n" + text
+        )
+    elif action == "longer":
+        prompt = (
+            "Expand and elaborate on the following text to make it longer and richer. "
+            "Return only the expanded text, no explanation, no preamble:\n\n" + text
+        )
+    else:  # grammar
+        prompt = (
+            "Check the following text for grammar and spelling errors. "
+            "Return a JSON array of error objects. Each object must have exactly these fields:\n"
+            '  "original": the exact erroneous substring as it appears in the text,\n'
+            '  "correction": the corrected replacement,\n'
+            '  "explanation": a brief one-sentence explanation,\n'
+            '  "offset": the zero-based character index where the error starts.\n'
+            "If there are no errors return an empty JSON array []. "
+            "Return only valid JSON, no markdown fences, no other text.\n\n"
+            "Text:\n" + text
+        )
+
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    result_text = message.content[0].text.strip()
+
+    if action == "grammar":
+        errors = json.loads(result_text)
+        return {"errors": errors}
+    return {"result": result_text}

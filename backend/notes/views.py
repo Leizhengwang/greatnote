@@ -251,3 +251,20 @@ class SharedWithMePageView(APIView):
         except Page.DoesNotExist:
             return Response(status=status.HTTP_403_FORBIDDEN)
         return Response(SharedPageSerializer(page).data)
+
+
+class AIReviseView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, note_pk, pk):
+        action = request.data.get("action", "")
+        text = request.data.get("text", "")
+        try:
+            result = services.ai_revise_text(request.user, pk, action, text)
+        except Page.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({"error": "AI service error"}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(result)

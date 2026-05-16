@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import User
 from django.test import TestCase
@@ -676,3 +677,74 @@ class UserShareServiceTests(TestCase):
         services.revoke_user_share(self.owner, self.page.pk, self.invitee.pk)
         with self.assertRaises(Page.DoesNotExist):
             services.get_page_for_shared_user(self.invitee, self.page.pk)
+
+
+class AIReviseServiceTests(TestCase):
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="u1", password="p")
+        self.note = services.create_note(self.user)
+        self.page = self.note.pages.first()
+
+    def _mock_client(self, response_text):
+        mock_client = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.content = [MagicMock(text=response_text)]
+        mock_client.messages.create.return_value = mock_msg
+        return mock_client
+
+    @patch('notes.services.anthropic.Anthropic')
+    def test_improve_returns_result_dict(self, MockAnthropic):
+        MockAnthropic.return_value = self._mock_client("Better text here.")
+        result = services.ai_revise_text(self.user, self.page.pk, "improve", "Hello world")
+        self.assertEqual(result, {"result": "Better text here."})
+
+    @patch('notes.services.anthropic.Anthropic')
+    def test_shorter_returns_result_dict(self, MockAnthropic):
+        MockAnthropic.return_value = self._mock_client("Short.")
+        result = services.ai_revise_text(self.user, self.page.pk, "shorter", "This is a long sentence.")
+        self.assertEqual(result, {"result": "Short."})
+
+    @patch('notes.services.anthropic.Anthropic')
+    def test_longer_returns_result_dict(self, MockAnthropic):
+        MockAnthropic.return_value = self._mock_client("Expanded text.")
+        result = services.ai_revise_text(self.user, self.page.pk, "longer", "Short.")
+        self.assertEqual(result, {"result": "Expanded text."})
+
+    @patch('notes.services.anthropic.Anthropic')
+    def test_grammar_returns_errors_list(self, MockAnthropic):
+        errors_json = '[{"original": "teh", "correction": "the", "explanation": "Typo", "offset": 0}]'
+        MockAnthropic.return_value = self._mock_client(errors_json)
+        result = services.ai_revise_text(self.user, self.page.pk, "grammar", "teh cat sat")
+        self.assertIn("errors", result)
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertEqual(result["errors"][0]["original"], "teh")
+        self.assertEqual(result["errors"][0]["correction"], "the")
+
+    @patch('notes.services.anthropic.Anthropic')
+    def test_grammar_no_errors_returns_empty_list(self, MockAnthropic):
+        MockAnthropic.return_value = self._mock_client("[]")
+        result = services.ai_revise_text(self.user, self.page.pk, "grammar", "Perfect prose.")
+        self.assertEqual(result, {"errors": []})
+
+    def test_invalid_action_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            services.ai_revise_text(self.user, self.page.pk, "rewrite", "text")
+
+    def test_empty_text_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            services.ai_revise_text(self.user, self.page.pk, "improve", "")
+
+    def test_whitespace_only_text_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            services.ai_revise_text(self.user, self.page.pk, "improve", "   ")
+
+    def test_ownership_enforced_for_other_users_page(self):
+        other = User.objects.create_user(username="u2", password="p")
+        their_note = services.create_note(other)
+        with self.assertRaises(Page.DoesNotExist):
+            services.ai_revise_text(self.user, their_note.pages.first().pk, "improve", "text")
+
+    def test_missing_page_raises_does_not_exist(self):
+        with self.assertRaises(Page.DoesNotExist):
+            services.ai_revise_text(self.user, 99999, "improve", "text")

@@ -15,4 +15,5 @@ urlpatterns = [
     path("notes/<int:note_pk>/pages/<int:pk>/share/users/<int:shared_user_id>/", views.PageUserShareDetailView.as_view(), name="page-user-share-detail"),
     path("shared/<uuid:token>/", views.PublicPageView.as_view(), name="page-public-view"),
     path("pages/<int:pk>/shared-with-me/", views.SharedWithMePageView.as_view(), name="page-shared-with-me"),
+    path("notes/<int:note_pk>/pages/<int:pk>/ai-revise/", views.AIReviseView.as_view(), name="ai-revise"),
 ]
