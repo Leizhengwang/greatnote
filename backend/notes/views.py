@@ -164,6 +164,22 @@ class NoteRankingView(APIView):
         return Response(services.rank_notes_by_criteria(request.user, note_ids, criteria))
 
 
+class ProjectTrackerView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        note_ids = request.data.get("note_ids", [])
+        if not note_ids:
+            return Response({"error": "note_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            result = services.analyze_projects(request.user, note_ids)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({"error": "AI service error"}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(result)
+
+
 class NotePageDetailView(APIView):
     permission_classes = [IsAuthenticated]
 

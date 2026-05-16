@@ -1,3 +1,4 @@
+import json
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -817,6 +818,103 @@ class PageAttachmentServiceTests(TestCase):
         att = services.upload_attachment(self.user, self.page.pk, self._make_file())
         with self.assertRaises(PageAttachment.DoesNotExist):
             services.delete_attachment(self.other, att.pk)
+
+
+class ProjectTrackerServiceTests(TestCase):
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="u1", password="p")
+        self.other = User.objects.create_user(username="u2", password="p")
+
+    def _mock_client(self, response_text):
+        mock_client = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.content = [MagicMock(text=response_text)]
+        mock_client.messages.create.return_value = mock_msg
+        return mock_client
+
+    _VALID_RESPONSE = json.dumps({
+        "projects": [
+            {
+                "name": "Alpha",
+                "source_notes": ["Note 1"],
+                "overall_status": "ongoing",
+                "final_deadline": "2025-12-31",
+                "stages": [
+                    {"name": "Planning", "status": "complete", "start_date": "2025-01-01", "end_date": "2025-02-01", "details": "Done"},
+                    {"name": "Build",    "status": "ongoing",  "start_date": "2025-02-01", "end_date": None,         "details": "In progress"},
+                ]
+            }
+        ],
+        "unified_timeline": {
+            "summary": "One project ongoing.",
+            "entries": [
+                {"date": "2025-01-01", "project": "Alpha", "milestone": "Planning", "status": "complete", "notes": ""},
+                {"date": "2025-02-01", "project": "Alpha", "milestone": "Build",    "status": "ongoing",  "notes": ""},
+            ]
+        }
+    })
+
+    @patch('notes.services.anthropic.Anthropic')
+    def test_analyze_projects_returns_two_top_level_keys(self, MockAnthropic):
+        MockAnthropic.return_value = self._mock_client(self._VALID_RESPONSE)
+        note = services.create_note(self.user, title="Note 1", body="Alpha project planning done.")
+        result = services.analyze_projects(self.user, [note.pk])
+        self.assertIn("projects", result)
+        self.assertIn("unified_timeline", result)
+
+    @patch('notes.services.anthropic.Anthropic')
+    def test_analyze_projects_returns_project_list(self, MockAnthropic):
+        MockAnthropic.return_value = self._mock_client(self._VALID_RESPONSE)
+        note = services.create_note(self.user, title="Note 1", body="content")
+        result = services.analyze_projects(self.user, [note.pk])
+        self.assertEqual(len(result["projects"]), 1)
+        self.assertEqual(result["projects"][0]["name"], "Alpha")
+        self.assertEqual(len(result["projects"][0]["stages"]), 2)
+
+    @patch('notes.services.anthropic.Anthropic')
+    def test_analyze_projects_returns_unified_timeline_with_entries(self, MockAnthropic):
+        MockAnthropic.return_value = self._mock_client(self._VALID_RESPONSE)
+        note = services.create_note(self.user, title="Note 1", body="content")
+        result = services.analyze_projects(self.user, [note.pk])
+        unified = result["unified_timeline"]
+        self.assertIn("entries", unified)
+        self.assertIn("summary", unified)
+        self.assertEqual(len(unified["entries"]), 2)
+
+    @patch('notes.services.anthropic.Anthropic')
+    def test_analyze_projects_excludes_other_users_notes(self, MockAnthropic):
+        MockAnthropic.return_value = self._mock_client(self._VALID_RESPONSE)
+        their_note = services.create_note(self.other, title="Secret")
+        my_note = services.create_note(self.user, title="Mine")
+        result = services.analyze_projects(self.user, [their_note.pk, my_note.pk])
+        # Only my_note is passed to the AI; the call must still succeed with 1 note
+        call_kwargs = MockAnthropic.return_value.messages.create.call_args
+        prompt_sent = call_kwargs[1]["messages"][0]["content"]
+        self.assertIn("Mine", prompt_sent)
+        self.assertNotIn("Secret", prompt_sent)
+
+    def test_analyze_projects_raises_when_no_accessible_notes(self):
+        their_note = services.create_note(self.other, title="Secret")
+        with self.assertRaises(ValueError):
+            services.analyze_projects(self.user, [their_note.pk])
+
+    @patch('notes.services.anthropic.Anthropic')
+    def test_analyze_projects_raises_on_ai_failure(self, MockAnthropic):
+        MockAnthropic.return_value.messages.create.side_effect = Exception("API down")
+        note = services.create_note(self.user, title="Note")
+        with self.assertRaises(Exception):
+            services.analyze_projects(self.user, [note.pk])
+
+    @patch('notes.services.anthropic.Anthropic')
+    def test_analyze_projects_includes_page_bodies_in_prompt(self, MockAnthropic):
+        MockAnthropic.return_value = self._mock_client(self._VALID_RESPONSE)
+        note = services.create_note(self.user, title="My Note")
+        services.update_page_body(self.user, note.pages.first().pk, "Phase 1 starts Jan 2025")
+        services.analyze_projects(self.user, [note.pk])
+        call_kwargs = MockAnthropic.return_value.messages.create.call_args
+        prompt_sent = call_kwargs[1]["messages"][0]["content"]
+        self.assertIn("Phase 1 starts Jan 2025", prompt_sent)
 
 
 class NoteRankingServiceTests(TestCase):
