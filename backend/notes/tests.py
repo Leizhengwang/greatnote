@@ -817,3 +817,85 @@ class PageAttachmentServiceTests(TestCase):
         att = services.upload_attachment(self.user, self.page.pk, self._make_file())
         with self.assertRaises(PageAttachment.DoesNotExist):
             services.delete_attachment(self.other, att.pk)
+
+
+class NoteRankingServiceTests(TestCase):
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="u1", password="p")
+
+    def test_more_relevant_note_ranks_first(self):
+        note_a = services.create_note(self.user, title="Python programming language")
+        services.update_page_body(self.user, note_a.pages.first().pk,
+                                  "python scripts functions classes decorators")
+        note_b = services.create_note(self.user, title="Cooking pasta recipes")
+        services.update_page_body(self.user, note_b.pages.first().pk,
+                                  "boil water sauce garlic tomato")
+        result = services.rank_notes_by_criteria(
+            self.user, [note_a.pk, note_b.pk], "python programming"
+        )
+        self.assertEqual(result["ranked"][0]["note_id"], note_a.pk)
+
+    def test_only_selected_notes_appear_in_results(self):
+        note_a = services.create_note(self.user, title="Alpha")
+        note_b = services.create_note(self.user, title="Beta")
+        note_c = services.create_note(self.user, title="Gamma")
+        result = services.rank_notes_by_criteria(
+            self.user, [note_a.pk, note_b.pk], "alpha beta"
+        )
+        ids = {r["note_id"] for r in result["ranked"]}
+        self.assertEqual(len(result["ranked"]), 2)
+        self.assertNotIn(note_c.pk, ids)
+
+    def test_other_users_notes_silently_excluded(self):
+        other = User.objects.create_user(username="u2", password="p")
+        theirs = services.create_note(other, title="Secret note content")
+        mine = services.create_note(self.user, title="My note content")
+        result = services.rank_notes_by_criteria(
+            self.user, [theirs.pk, mine.pk], "content"
+        )
+        ids = {r["note_id"] for r in result["ranked"]}
+        self.assertNotIn(theirs.pk, ids)
+        self.assertIn(mine.pk, ids)
+
+    def test_all_stopword_criteria_returns_zero_scores(self):
+        note = services.create_note(self.user, title="Something interesting")
+        result = services.rank_notes_by_criteria(self.user, [note.pk], "the and or")
+        self.assertEqual(result["query_terms"], [])
+        self.assertEqual(result["ranked"][0]["score"], 0.0)
+
+    def test_empty_note_ids_returns_empty_ranked(self):
+        result = services.rank_notes_by_criteria(self.user, [], "python")
+        self.assertEqual(result["ranked"], [])
+        self.assertEqual(result["query_terms"], [])
+
+    def test_single_note_gets_rank_one(self):
+        note = services.create_note(self.user, title="Only note here")
+        result = services.rank_notes_by_criteria(self.user, [note.pk], "only note")
+        self.assertEqual(len(result["ranked"]), 1)
+        self.assertEqual(result["ranked"][0]["rank"], 1)
+
+    def test_matched_keywords_reported_per_note(self):
+        note = services.create_note(self.user, title="machine learning algorithms")
+        result = services.rank_notes_by_criteria(
+            self.user, [note.pk], "machine learning"
+        )
+        kws = result["ranked"][0]["matched_keywords"]
+        self.assertIn("machine", kws)
+        self.assertIn("learning", kws)
+
+    def test_title_content_contributes_to_score(self):
+        title_note = services.create_note(self.user, title="Django REST framework")
+        body_note  = services.create_note(self.user, title="Random note")
+        services.update_page_body(self.user, body_note.pages.first().pk, "django rest framework")
+        result = services.rank_notes_by_criteria(
+            self.user, [title_note.pk, body_note.pk], "django rest framework"
+        )
+        # title_note has title repeated 3× in token stream, so its score >= body_note
+        scores = {r["note_id"]: r["score"] for r in result["ranked"]}
+        self.assertGreaterEqual(scores[title_note.pk], scores[body_note.pk])
+
+    def test_query_terms_returned_sorted(self):
+        note = services.create_note(self.user, title="zebra apple mango")
+        result = services.rank_notes_by_criteria(self.user, [note.pk], "zebra apple mango")
+        self.assertEqual(result["query_terms"], sorted(result["query_terms"]))

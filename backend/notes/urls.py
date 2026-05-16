@@ -10,6 +10,7 @@ urlpatterns = [
     path("notes/<int:pk>/", views.NoteDetailView.as_view(), name="note-detail"),
     path("notes/<int:note_pk>/pages/", views.NotePageListCreateView.as_view(), name="note-page-list-create"),
     path("notes/<int:note_pk>/pages/<int:pk>/", views.NotePageDetailView.as_view(), name="note-page-detail"),
+    path("notes/ranking/", views.NoteRankingView.as_view(), name="note-ranking"),
     path("notes/<int:note_pk>/pages/<int:pk>/share/public/", views.PagePublicShareView.as_view(), name="page-public-share"),
     path("notes/<int:note_pk>/pages/<int:pk>/share/users/", views.PageUserShareListView.as_view(), name="page-user-share-list"),
     path("notes/<int:note_pk>/pages/<int:pk>/share/users/<int:shared_user_id>/", views.PageUserShareDetailView.as_view(), name="page-user-share-detail"),
