@@ -450,16 +450,82 @@ function PageBlock({ noteId, page, pageNumber, totalPages, onUpdate, onInsertAft
   );
 }
 
-export default function NoteEditor({ note, pages, onTitleChange, onPageUpdate, onInsertPage, onDeletePage, isSaving }) {
+function buildMarkdown(note, pages) {
+  const title = `# ${note.title || 'Untitled'}`;
+  const bodies = pages.map(p => p.body);
+  return [title, ...bodies].join('\n\n---\n\n');
+}
+
+function buildPlainText(note, pages) {
+  const title = note.title || 'Untitled';
+  const bodies = pages.map(p =>
+    p.body
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/\*(.+?)\*/g, '$1')
+      .replace(/__(.+?)__/g, '$1')
+      .replace(/_(.+?)_/g, '$1')
+      .replace(/`{3}[\s\S]*?`{3}/g, '')
+      .replace(/`(.+?)`/g, '$1')
+      .replace(/^>\s+/gm, '')
+      .replace(/^[-*]\s+/gm, '')
+  );
+  return [title, ...bodies].join('\n\n---\n\n');
+}
+
+function triggerDownload(content, filename) {
+  const blob = new Blob([content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function parseImportFile(filename, text) {
+  const lines = text.split('\n');
+  const firstLine = lines[0].trim();
+  if (firstLine.startsWith('# ')) {
+    const title = firstLine.slice(2).trim();
+    const body = lines.slice(1).join('\n').trim();
+    return { title, body };
+  }
+  const title = filename.replace(/\.(md|txt)$/i, '');
+  return { title, body: text };
+}
+
+export default function NoteEditor({ note, pages, onTitleChange, onPageUpdate, onInsertPage, onDeletePage, onImportNote, isSaving }) {
   const [sharingPageId, setSharingPageId] = useState(null);
+  const importInputRef = useRef(null);
+
+  const handleImportFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const { title, body } = parseImportFile(file.name, ev.target.result);
+      onImportNote(title, body);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   if (!note) {
     return (
       <div style={{ padding: '24px', color: '#aaa', textAlign: 'center', marginTop: '60px' }}>
         Select a note or create one.
+        <div style={{ marginTop: '12px' }}>
+          <input ref={importInputRef} type="file" accept=".md,.txt" style={{ display: 'none' }} onChange={handleImportFile} />
+          <button style={{ ...btnStyle, padding: '5px 12px' }} onClick={() => importInputRef.current?.click()}>
+            Import .md / .txt
+          </button>
+        </div>
       </div>
     );
   }
+
+  const safeFilename = (note.title || 'note').replace(/[^a-z0-9_\-\s]/gi, '_').trim() || 'note';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
@@ -473,6 +539,16 @@ export default function NoteEditor({ note, pages, onTitleChange, onPageUpdate, o
           style={{ flex: 1, fontSize: '18px', fontWeight: 600, border: 'none', outline: 'none', padding: '4px 0' }}
         />
         {isSaving && <span style={{ fontSize: '11px', color: '#999' }}>Saving…</span>}
+        <input ref={importInputRef} type="file" accept=".md,.txt" style={{ display: 'none' }} onChange={handleImportFile} />
+        <button style={btnStyle} onClick={() => importInputRef.current?.click()} title="Import a .md or .txt file as a new note">
+          Import
+        </button>
+        <button style={btnStyle} onClick={() => triggerDownload(buildMarkdown(note, pages), `${safeFilename}.md`)} title="Download as Markdown">
+          Export .md
+        </button>
+        <button style={btnStyle} onClick={() => triggerDownload(buildPlainText(note, pages), `${safeFilename}.txt`)} title="Download as plain text">
+          Export .txt
+        </button>
       </div>
 
       {/* pages */}

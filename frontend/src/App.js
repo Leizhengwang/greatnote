@@ -89,6 +89,23 @@ function NotesApp({ username, onLogout }) {
     });
   };
 
+  const handleImportNote = (title, body) => {
+    noteService.createNote({ title }).then(note => {
+      pageService.listPages(note.id).then(pages => {
+        const firstPage = pages[0];
+        if (firstPage && body) {
+          pageService.updatePage(note.id, firstPage.id, body).then(() => {
+            loadNotes();
+            setSelectedNoteId(note.id);
+          });
+        } else {
+          loadNotes();
+          setSelectedNoteId(note.id);
+        }
+      });
+    });
+  };
+
   const handleDelete = (id) => {
     noteService.deleteNote(id).then(() => {
       setNotes(prev => prev.filter(n => n.id !== id));
@@ -189,6 +206,7 @@ function NotesApp({ username, onLogout }) {
           onPageUpdate={handlePageUpdate}
           onInsertPage={handleInsertPage}
           onDeletePage={handleDeletePage}
+          onImportNote={handleImportNote}
           isSaving={isSaving}
         />
       </div>
