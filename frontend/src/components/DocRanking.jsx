@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { listNotes } from '../services/noteService';
 import { rankNotes } from '../services/docService';
 
-export default function DocRanking() {
+export default function DocRanking({ onBack }) {
   const [phase, setPhase] = useState('select'); // 'select' | 'loading' | 'results'
   const [notes, setNotes] = useState([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
@@ -43,7 +43,10 @@ export default function DocRanking() {
       <div style={s.container}>
         <div style={s.row}>
           <h2 style={s.heading}>Ranking Results</h2>
-          <button style={s.backBtn} onClick={() => setPhase('select')}>← Rank Again</button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button style={s.backBtn} onClick={() => setPhase('select')}>← Rank Again</button>
+            <button style={s.backBtn} onClick={onBack}>← Back to Notes</button>
+          </div>
         </div>
 
         <p style={s.sub}>
@@ -90,7 +93,10 @@ export default function DocRanking() {
   // Phase: select
   return (
     <div style={s.container}>
-      <h2 style={s.heading}>Rank Notes by Relevance</h2>
+      <div style={s.row}>
+        <h2 style={s.heading}>Rank Notes by Relevance</h2>
+        <button style={s.backBtn} onClick={onBack}>← Back to Notes</button>
+      </div>
       <p style={s.sub}>Select notes to compare, then describe what you're looking for.</p>
 
       {error && <div style={s.error}>{error}</div>}

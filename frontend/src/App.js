@@ -208,7 +208,7 @@ function NotesApp({ username, onLogout }) {
       {/* Editor / Doc Ranking */}
       <div style={{ flex: 1, overflow: 'auto' }}>
         {showDocRanking ? (
-          <DocRanking />
+          <DocRanking onBack={() => setShowDocRanking(false)} />
         ) : (
           <NoteEditor
             note={selectedNote}
